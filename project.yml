@@ -1,0 +1,33 @@
+name: XcodeCleaner
+options:
+  bundleIdPrefix: com.daveshed
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+targets:
+  XcodeCleaner:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.daveshed.XcodeCleaner
+        INFOPLIST_GENERATION_MODE: GeneratedByXcode
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_LSUIElement: true
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Dave. All rights reserved."
+        INFOPLIST_KEY_CFBundleDisplayName: "Xcode Cleaner"
+        CODE_SIGN_ENTITLEMENTS: Sources/Resources/XcodeCleaner.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_HARDENED_RUNTIME: true
+        CODE_SIGN_IDENTITY: "-"
