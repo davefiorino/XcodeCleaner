@@ -48,6 +48,16 @@ enum CategoryType: String, CaseIterable, Identifiable {
         case .logs: return "doc.plaintext"
         }
     }
+    var infoText: String? {
+        switch self {
+        case .deviceSupport:
+            return "Debug symbol files for physical devices. Xcode downloads these when you connect a device. Safe to delete — Xcode will re-download them when needed."
+        case .coreSimulator:
+            return "Full simulator devices. Deleting removes the simulator entirely (uses simctl delete). Xcode recreates default devices on next launch."
+        default:
+            return nil
+        }
+    }
 }
 
 struct CategoryItem: Identifiable {

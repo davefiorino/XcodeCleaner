@@ -6,12 +6,13 @@ struct CategoryCardView: View {
     let category: CategoryType
     let size: Int64
     let items: [CategoryItem]
-    let onDeleteAll: () -> Void
+    let deletionProgress: DeletionProgress
     let onRescan: () -> Void
 
     @State private var isExpanded = false
     @State private var selectedItems: Set<UUID> = []
     @State private var showDeleteAlert = false
+    @State private var showInfo = false
 
     private var hasContent: Bool { size > 0 }
     private var hasSelection: Bool { !selectedItems.isEmpty }
@@ -27,6 +28,23 @@ struct CategoryCardView: View {
 
                 Text(category.rawValue)
                     .font(.system(size: 14, weight: .semibold))
+
+                if category.infoText != nil {
+                    Button {
+                        showInfo.toggle()
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showInfo, arrowEdge: .bottom) {
+                        Text(category.infoText ?? "")
+                            .font(.system(size: 12))
+                            .padding(12)
+                            .frame(width: 240)
+                    }
+                }
 
                 Spacer()
 
@@ -178,7 +196,7 @@ struct CategoryCardView: View {
         let toDelete = items.filter { selectedItems.contains($0.id) }
         Task {
             do {
-                _ = try CleanerService.moveToTrash(toDelete)
+                _ = try await CleanerService.moveToTrash(toDelete, category: category, progress: deletionProgress)
                 selectedItems.removeAll()
                 onRescan()
             } catch {}
@@ -188,7 +206,7 @@ struct CategoryCardView: View {
     private func deleteAll() {
         Task {
             do {
-                _ = try CleanerService.moveAllToTrash(category)
+                _ = try await CleanerService.moveAllToTrash(category, progress: deletionProgress)
                 selectedItems.removeAll()
                 onRescan()
             } catch {}

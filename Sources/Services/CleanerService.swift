@@ -2,62 +2,151 @@
 
 import Foundation
 
+@MainActor
+final class DeletionProgress: ObservableObject {
+    @Published var isActive = false
+    @Published var fractionCompleted: Double = 0
+    @Published var statusText: String = ""
+}
+
 enum CleanerService {
 
-    static func deleteCategory(_ category: CategoryType) throws -> Int64 {
-        let basePath = category.basePath
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: basePath) else { return 0 }
+    static func moveToTrash(
+        _ items: [CategoryItem],
+        category: CategoryType? = nil,
+        progress: DeletionProgress? = nil
+    ) async throws -> Int64 {
+        let totalSize = items.reduce(Int64(0)) { $0 + $1.size }
+        let showProgress = totalSize > 1_000_000_000 && progress != nil
 
-        var freedSpace: Int64 = 0
-        let contents = try fm.contentsOfDirectory(atPath: basePath)
-
-        for item in contents {
-            if item.hasPrefix(".") { continue }
-            let fullPath = (basePath as NSString).appendingPathComponent(item)
-            let size = Self.itemSize(atPath: fullPath, fm: fm)
-            try fm.removeItem(atPath: fullPath)
-            freedSpace += size
+        if showProgress {
+            await MainActor.run {
+                progress?.isActive = true
+                progress?.fractionCompleted = 0
+                progress?.statusText = "Preparing..."
+            }
         }
-        return freedSpace
-    }
 
-    static func deleteItems(_ items: [CategoryItem]) throws -> Int64 {
-        let fm = FileManager.default
         var freed: Int64 = 0
-        for item in items {
-            guard fm.fileExists(atPath: item.path) else { continue }
-            try fm.removeItem(atPath: item.path)
-            freed += item.size
+        for (index, item) in items.enumerated() {
+            guard FileManager.default.fileExists(atPath: item.path) else { continue }
+            freed += try clearItem(item, category: category)
+
+
+            if showProgress {
+                let fraction = Double(index + 1) / Double(items.count)
+                let freedText = FormatUtils.formatBytes(freed)
+                let totalText = FormatUtils.formatBytes(totalSize)
+                await MainActor.run {
+                    progress?.fractionCompleted = fraction
+                    progress?.statusText = "\(freedText) / \(totalText)"
+                }
+            }
+        }
+
+        if showProgress {
+            await MainActor.run {
+                progress?.isActive = false
+            }
         }
         return freed
     }
 
-    static func moveToTrash(_ items: [CategoryItem]) throws -> Int64 {
-        var freed: Int64 = 0
-        for item in items {
-            let url = URL(fileURLWithPath: item.path)
-            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
-            freed += item.size
-        }
-        return freed
-    }
-
-    static func moveAllToTrash(_ category: CategoryType) throws -> Int64 {
+    static func moveAllToTrash(
+        _ category: CategoryType,
+        progress: DeletionProgress? = nil
+    ) async throws -> Int64 {
         let basePath = category.basePath
         let fm = FileManager.default
         guard fm.fileExists(atPath: basePath) else { return 0 }
 
-        var freed: Int64 = 0
         let contents = try fm.contentsOfDirectory(atPath: basePath)
+            .filter { !$0.hasPrefix(".") }
 
-        for item in contents {
-            if item.hasPrefix(".") { continue }
+        let itemsWithSizes: [(path: String, size: Int64)] = contents.map { item in
             let fullPath = (basePath as NSString).appendingPathComponent(item)
-            let size = Self.itemSize(atPath: fullPath, fm: fm)
-            let url = URL(fileURLWithPath: fullPath)
-            try fm.trashItem(at: url, resultingItemURL: nil)
-            freed += size
+            return (fullPath, itemSize(atPath: fullPath, fm: fm))
+        }
+
+        let totalSize = itemsWithSizes.reduce(Int64(0)) { $0 + $1.size }
+        let showProgress = totalSize > 1_000_000_000 && progress != nil
+
+        if showProgress {
+            await MainActor.run {
+                progress?.isActive = true
+                progress?.fractionCompleted = 0
+                progress?.statusText = "Preparing..."
+            }
+        }
+
+        var freed: Int64 = 0
+        for (index, entry) in itemsWithSizes.enumerated() {
+            if category == .coreSimulator {
+                freed += deleteSimulatorViaSimctl(devicePath: entry.path, size: entry.size)
+            } else {
+                let url = URL(fileURLWithPath: entry.path)
+                try fm.trashItem(at: url, resultingItemURL: nil)
+                freed += entry.size
+            }
+
+            if showProgress {
+                let fraction = Double(index + 1) / Double(itemsWithSizes.count)
+                let freedText = FormatUtils.formatBytes(freed)
+                let totalText = FormatUtils.formatBytes(totalSize)
+                await MainActor.run {
+                    progress?.fractionCompleted = fraction
+                    progress?.statusText = "\(freedText) / \(totalText)"
+                }
+            }
+        }
+
+        if showProgress {
+            await MainActor.run {
+                progress?.isActive = false
+            }
+        }
+        return freed
+    }
+
+    private static func clearItem(_ item: CategoryItem, category: CategoryType? = nil) throws -> Int64 {
+        let fm = FileManager.default
+        let plistPath = (item.path as NSString).appendingPathComponent("device.plist")
+        let isSimulatorDevice = fm.fileExists(atPath: plistPath)
+
+        if isSimulatorDevice && category == .simulatorAppData {
+            return try clearSimulatorAppData(devicePath: item.path, fm: fm)
+        }
+        if isSimulatorDevice && category == .coreSimulator {
+            return deleteSimulatorViaSimctl(devicePath: item.path, size: item.size)
+        }
+        // Normal item: move to trash
+        let url = URL(fileURLWithPath: item.path)
+        try fm.trashItem(at: url, resultingItemURL: nil)
+        return item.size
+    }
+
+    private static func deleteSimulatorViaSimctl(devicePath: String, size: Int64) -> Int64 {
+        let udid = (devicePath as NSString).lastPathComponent
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = ["simctl", "delete", udid]
+        try? process.run()
+        process.waitUntilExit()
+        return process.terminationStatus == 0 ? size : 0
+    }
+
+    private static func clearSimulatorAppData(devicePath: String, fm: FileManager) throws -> Int64 {
+        var freed: Int64 = 0
+        for subdir in simulatorSafeAppDataSubdirs {
+            let path = (devicePath as NSString).appendingPathComponent(subdir)
+            guard fm.fileExists(atPath: path) else { continue }
+            let contents = try fm.contentsOfDirectory(atPath: path)
+            for entry in contents {
+                let fullPath = (path as NSString).appendingPathComponent(entry)
+                let size = itemSize(atPath: fullPath, fm: fm)
+                try fm.trashItem(at: URL(fileURLWithPath: fullPath), resultingItemURL: nil)
+                freed += size
+            }
         }
         return freed
     }

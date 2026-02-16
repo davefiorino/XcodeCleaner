@@ -2,33 +2,59 @@
 
 import Foundation
 
+let simulatorSafeAppDataSubdirs = [
+    "data/Containers/Data/Application",
+    "data/Containers/Bundle/Application"
+]
+
 @MainActor
 final class DiskAnalyzer: ObservableObject {
     @Published var storageInfo = StorageInfo(totalSpace: 0, usedSpace: 0, freeSpace: 0)
     @Published var categorySizes: [CategoryType: Int64] = [:]
     @Published var categoryItems: [CategoryType: [CategoryItem]] = [:]
     @Published var isScanning = false
+    @Published var trashSize: Int64 = 0
 
     func scanAll() {
+        rescan(CategoryType.allCases)
+    }
+
+    func rescan(_ categories: some Collection<CategoryType>) {
         isScanning = true
         storageInfo = StorageInfo.current()
+        let toScan = Array(categories)
 
         Task.detached {
             var sizes: [CategoryType: Int64] = [:]
             var items: [CategoryType: [CategoryItem]] = [:]
 
-            for category in CategoryType.allCases {
+            for category in toScan {
                 let (size, categoryItemsList) = Self.scanCategory(category)
                 sizes[category] = size
                 items[category] = categoryItemsList
             }
 
-            await MainActor.run { [sizes, items] in
-                self.categorySizes = sizes
-                self.categoryItems = items
+            let trash = Self.scanTrashSize()
+
+            await MainActor.run { [sizes, items, trash] in
+                for (cat, size) in sizes {
+                    self.categorySizes[cat] = size
+                }
+                for (cat, itemList) in items {
+                    self.categoryItems[cat] = itemList
+                }
+                self.trashSize = trash
                 self.isScanning = false
             }
         }
+    }
+
+    private nonisolated static func scanTrashSize() -> Int64 {
+        let fm = FileManager.default
+        let trashPath = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent(".Trash").path
+        guard fm.fileExists(atPath: trashPath) else { return 0 }
+        return directorySize(atPath: trashPath, fm: fm)
     }
 
     private nonisolated static func scanCategory(_ category: CategoryType) -> (Int64, [CategoryItem]) {
@@ -75,16 +101,23 @@ final class DiskAnalyzer: ObservableObject {
         for uuid in deviceUUIDs {
             if uuid.hasPrefix(".") { continue }
             let devicePath = (basePath as NSString).appendingPathComponent(uuid)
-            let containersPath = (devicePath as NSString).appendingPathComponent("data/Containers")
 
-            guard fm.fileExists(atPath: containersPath) else { continue }
+            var deviceSize: Int64 = 0
+            var appDataPaths: [String] = []
+            for subdir in simulatorSafeAppDataSubdirs {
+                let path = (devicePath as NSString).appendingPathComponent(subdir)
+                guard fm.fileExists(atPath: path) else { continue }
+                let size = directorySize(atPath: path, fm: fm)
+                deviceSize += size
+                appDataPaths.append(path)
+            }
+
+            guard deviceSize > 0 else { continue }
 
             let deviceName = simulatorDeviceName(atPath: devicePath, fm: fm) ?? uuid
-            let size = directorySize(atPath: containersPath, fm: fm)
-            guard size > 0 else { continue }
-
-            totalSize += size
-            items.append(CategoryItem(name: deviceName, path: containersPath, size: size))
+            // Store the device path; deletion will target only safe subdirs
+            items.append(CategoryItem(name: deviceName, path: devicePath, size: deviceSize))
+            totalSize += deviceSize
         }
 
         items.sort { $0.size > $1.size }
