@@ -7,6 +7,21 @@ final class DeletionProgress: ObservableObject {
     @Published var isActive = false
     @Published var fractionCompleted: Double = 0
     @Published var statusText: String = ""
+
+    func update(fraction: Double, status: String) {
+        fractionCompleted = fraction
+        statusText = status
+    }
+
+    func start() {
+        isActive = true
+        fractionCompleted = 0
+        statusText = "Preparing..."
+    }
+
+    func finish() {
+        isActive = false
+    }
 }
 
 enum CleanerService {
@@ -20,34 +35,26 @@ enum CleanerService {
         let showProgress = totalSize > 1_000_000_000 && progress != nil
 
         if showProgress {
-            await MainActor.run {
-                progress?.isActive = true
-                progress?.fractionCompleted = 0
-                progress?.statusText = "Preparing..."
-            }
+            await progress?.start()
         }
 
         var freed: Int64 = 0
         for (index, item) in items.enumerated() {
-            guard FileManager.default.fileExists(atPath: item.path) else { continue }
-            freed += try clearItem(item, category: category)
-
+            let cat = category
+            let result = try await Task.detached {
+                try clearItem(item, category: cat)
+            }.value
+            freed += result
 
             if showProgress {
                 let fraction = Double(index + 1) / Double(items.count)
-                let freedText = FormatUtils.formatBytes(freed)
-                let totalText = FormatUtils.formatBytes(totalSize)
-                await MainActor.run {
-                    progress?.fractionCompleted = fraction
-                    progress?.statusText = "\(freedText) / \(totalText)"
-                }
+                let status = "\(FormatUtils.formatBytes(freed)) / \(FormatUtils.formatBytes(totalSize))"
+                await progress?.update(fraction: fraction, status: status)
             }
         }
 
         if showProgress {
-            await MainActor.run {
-                progress?.isActive = false
-            }
+            await progress?.finish()
         }
         return freed
     }
@@ -72,38 +79,34 @@ enum CleanerService {
         let showProgress = totalSize > 1_000_000_000 && progress != nil
 
         if showProgress {
-            await MainActor.run {
-                progress?.isActive = true
-                progress?.fractionCompleted = 0
-                progress?.statusText = "Preparing..."
-            }
+            await progress?.start()
         }
 
         var freed: Int64 = 0
         for (index, entry) in itemsWithSizes.enumerated() {
-            if category == .coreSimulator {
-                freed += deleteSimulatorViaSimctl(devicePath: entry.path, size: entry.size)
-            } else {
-                let url = URL(fileURLWithPath: entry.path)
-                try fm.trashItem(at: url, resultingItemURL: nil)
-                freed += entry.size
+            let cat = category
+            let result = await Task.detached {
+                if cat == .coreSimulator {
+                    return deleteSimulatorViaSimctl(devicePath: entry.path, size: entry.size)
+                } else {
+                    let url = URL(fileURLWithPath: entry.path)
+                    try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                    return entry.size
+                }
+            }.result
+            if case .success(let size) = result {
+                freed += size
             }
 
             if showProgress {
                 let fraction = Double(index + 1) / Double(itemsWithSizes.count)
-                let freedText = FormatUtils.formatBytes(freed)
-                let totalText = FormatUtils.formatBytes(totalSize)
-                await MainActor.run {
-                    progress?.fractionCompleted = fraction
-                    progress?.statusText = "\(freedText) / \(totalText)"
-                }
+                let status = "\(FormatUtils.formatBytes(freed)) / \(FormatUtils.formatBytes(totalSize))"
+                await progress?.update(fraction: fraction, status: status)
             }
         }
 
         if showProgress {
-            await MainActor.run {
-                progress?.isActive = false
-            }
+            await progress?.finish()
         }
         return freed
     }
@@ -119,7 +122,6 @@ enum CleanerService {
         if isSimulatorDevice && category == .coreSimulator {
             return deleteSimulatorViaSimctl(devicePath: item.path, size: item.size)
         }
-        // Normal item: move to trash
         let url = URL(fileURLWithPath: item.path)
         try fm.trashItem(at: url, resultingItemURL: nil)
         return item.size
