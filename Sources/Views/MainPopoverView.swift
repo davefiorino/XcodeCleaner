@@ -28,7 +28,15 @@ struct MainPopoverView: View {
                         .disabled(deletionProgress.isActive)
                     }
 
-                    TrashCardView(size: analyzer.trashSize)
+                    HStack(spacing: 6) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Text("Remember to empty your macOS Trash!")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 4)
                 }
                 .padding(16)
             }

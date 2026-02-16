@@ -13,7 +13,6 @@ final class DiskAnalyzer: ObservableObject {
     @Published var categorySizes: [CategoryType: Int64] = [:]
     @Published var categoryItems: [CategoryType: [CategoryItem]] = [:]
     @Published var isScanning = false
-    @Published var trashSize: Int64 = 0
 
     func scanAll() {
         rescan(CategoryType.allCases)
@@ -34,28 +33,19 @@ final class DiskAnalyzer: ObservableObject {
                 items[category] = categoryItemsList
             }
 
-            let trash = Self.scanTrashSize()
-
-            await MainActor.run { [sizes, items, trash] in
+            await MainActor.run { [sizes, items] in
                 for (cat, size) in sizes {
                     self.categorySizes[cat] = size
                 }
                 for (cat, itemList) in items {
                     self.categoryItems[cat] = itemList
                 }
-                self.trashSize = trash
                 self.isScanning = false
             }
         }
     }
 
-    private nonisolated static func scanTrashSize() -> Int64 {
-        let fm = FileManager.default
-        let trashPath = fm.homeDirectoryForCurrentUser
-            .appendingPathComponent(".Trash").path
-        guard fm.fileExists(atPath: trashPath) else { return 0 }
-        return directorySize(atPath: trashPath, fm: fm)
-    }
+
 
     private nonisolated static func scanCategory(_ category: CategoryType) -> (Int64, [CategoryItem]) {
         if category == .simulatorAppData {
