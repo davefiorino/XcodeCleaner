@@ -52,16 +52,24 @@ struct CategoryCardView: View {
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
                     .foregroundStyle(size > 1_000_000_000 ? .orange : .secondary)
 
-                Button {
-                    showDeleteAlert = true
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.red.opacity(0.8))
+                if category != .coreSimulator {
+                    Button {
+                        showDeleteAlert = true
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.red.opacity(0.8))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!hasContent)
+                    .help(hasSelection ? "Move selected to Trash" : "Move all to Trash")
                 }
-                .buttonStyle(.plain)
-                .disabled(!hasContent)
-                .help(hasSelection ? "Move selected to Trash" : "Move all to Trash")
+            }
+
+            if category == .coreSimulator {
+                Text("Delete from Xcode")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
 
             // Expandable items list
@@ -108,44 +116,20 @@ struct CategoryCardView: View {
         !items.isEmpty && items.allSatisfy { selectedItems.contains($0.id) }
     }
 
+    private var isReadOnly: Bool { category == .coreSimulator }
+
     @ViewBuilder
     private var itemsList: some View {
         VStack(spacing: 2) {
-            HStack(spacing: 8) {
-                Toggle(isOn: Binding(
-                    get: { allSelected },
-                    set: { isOn in
-                        if isOn {
-                            selectedItems = Set(items.map(\.id))
-                        } else {
-                            selectedItems.removeAll()
-                        }
-                    }
-                )) {
-                    EmptyView()
-                }
-                .toggleStyle(.checkbox)
-                .controlSize(.small)
-
-                Text("Select All")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-            }
-            .padding(.vertical, 2)
-
-            Divider()
-
-            ForEach(items) { item in
+            if !isReadOnly {
                 HStack(spacing: 8) {
                     Toggle(isOn: Binding(
-                        get: { selectedItems.contains(item.id) },
+                        get: { allSelected },
                         set: { isOn in
                             if isOn {
-                                selectedItems.insert(item.id)
+                                selectedItems = Set(items.map(\.id))
                             } else {
-                                selectedItems.remove(item.id)
+                                selectedItems.removeAll()
                             }
                         }
                     )) {
@@ -153,6 +137,36 @@ struct CategoryCardView: View {
                     }
                     .toggleStyle(.checkbox)
                     .controlSize(.small)
+
+                    Text("Select All")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+                }
+                .padding(.vertical, 2)
+
+                Divider()
+            }
+
+            ForEach(items) { item in
+                HStack(spacing: 8) {
+                    if !isReadOnly {
+                        Toggle(isOn: Binding(
+                            get: { selectedItems.contains(item.id) },
+                            set: { isOn in
+                                if isOn {
+                                    selectedItems.insert(item.id)
+                                } else {
+                                    selectedItems.remove(item.id)
+                                }
+                            }
+                        )) {
+                            EmptyView()
+                        }
+                        .toggleStyle(.checkbox)
+                        .controlSize(.small)
+                    }
 
                     Text(cleanName(item.name))
                         .font(.system(size: 11))
@@ -168,7 +182,7 @@ struct CategoryCardView: View {
                 .padding(.vertical, 2)
             }
 
-            if !selectedItems.isEmpty {
+            if !isReadOnly && !selectedItems.isEmpty {
                 HStack {
                     Spacer()
                     Text("\(selectedItems.count) selected")
