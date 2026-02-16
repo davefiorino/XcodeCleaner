@@ -1,5 +1,6 @@
 // Created by Davide Fiorino
 
+import ServiceManagement
 import SwiftUI
 
 struct MainPopoverView: View {
@@ -37,6 +38,8 @@ struct MainPopoverView: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(.top, 4)
+
+                    LaunchAtLoginToggle()
                 }
                 .padding(16)
             }
@@ -76,6 +79,30 @@ struct DeletionProgressOverlay: View {
                 .shadow(radius: 8)
         )
         .padding(.horizontal, 40)
+    }
+}
+
+struct LaunchAtLoginToggle: View {
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+
+    var body: some View {
+        Toggle(isOn: $launchAtLogin) {
+            Label("Launch at Login", systemImage: "power")
+                .font(.system(size: 12))
+        }
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .onChange(of: launchAtLogin) { _, newValue in
+            do {
+                if newValue {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                launchAtLogin = SMAppService.mainApp.status == .enabled
+            }
+        }
     }
 }
 
