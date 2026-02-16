@@ -51,6 +51,9 @@ final class DiskAnalyzer: ObservableObject {
         if category == .simulatorAppData {
             return scanSimulatorAppData()
         }
+        if category == .coreSimulator {
+            return scanSimulatorDevices()
+        }
 
         let basePath = category.basePath
         let fm = FileManager.default
@@ -71,6 +74,31 @@ final class DiskAnalyzer: ObservableObject {
                 items.append(CategoryItem(name: item, path: fullPath, size: size))
             }
         } catch {}
+
+        items.sort { $0.size > $1.size }
+        return (totalSize, items)
+    }
+
+    private nonisolated static func scanSimulatorDevices() -> (Int64, [CategoryItem]) {
+        let fm = FileManager.default
+        let basePath = CategoryType.coreSimulator.basePath
+        guard fm.fileExists(atPath: basePath) else { return (0, []) }
+
+        var totalSize: Int64 = 0
+        var items: [CategoryItem] = []
+
+        guard let deviceUUIDs = try? fm.contentsOfDirectory(atPath: basePath) else {
+            return (0, [])
+        }
+
+        for uuid in deviceUUIDs {
+            if uuid.hasPrefix(".") { continue }
+            let devicePath = (basePath as NSString).appendingPathComponent(uuid)
+            let name = simulatorDeviceName(atPath: devicePath, fm: fm) ?? uuid
+            let size = directorySize(atPath: devicePath, fm: fm)
+            totalSize += size
+            items.append(CategoryItem(name: name, path: devicePath, size: size))
+        }
 
         items.sort { $0.size > $1.size }
         return (totalSize, items)
